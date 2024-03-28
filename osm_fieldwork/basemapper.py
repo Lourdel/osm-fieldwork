@@ -21,11 +21,13 @@
 
 import argparse
 import concurrent.futures
+import json
 import logging
 import queue
 import re
 import sys
 import threading
+from io import BytesIO
 from pathlib import Path
 from typing import Union
 
@@ -283,7 +285,7 @@ class BaseMapper(object):
         Returns:
             (list): The bounding box coordinates
         """
-        if not boundary.lower().endswith((".json", ".geojson")):
+        if isinstance(boundary, str) and not boundary.lower().endswith((".json", ".geojson")):
             # Is BBOX string
             try:
                 if "," in boundary:
@@ -304,9 +306,33 @@ class BaseMapper(object):
                 log.error(msg)
                 raise ValueError(msg) from None
 
-        log.debug(f"Reading geojson file: {boundary}")
-        with open(boundary, "r") as f:
-            poly = geojson.load(f)
+        elif isinstance(boundary, str) and boundary.lower().endswith((".json", ".geojson")):
+            log.debug(f"Reading geojson file: {boundary}")
+            try:
+                with open(boundary, "r") as f:
+                    poly = geojson.load(f)
+            except Exception as e:
+                log.error(e)
+                msg = f"Failed to parse GeoJSON file: {boundary}"
+                log.error(msg)
+                raise ValueError(msg) from None
+
+        elif isinstance(boundary, BytesIO):
+            log.debug(f"Reading BytesIO object: {boundary}")
+            boundary.seek(0)
+            try:
+                boundary_data = boundary.read().decode()
+                print(boundary_data)
+                poly = json.loads(boundary_data)
+            except Exception as e:
+                log.error(e)
+                msg = f"Failed to parse GeoJSON file from BytesIO object: {boundary}"
+                log.error(msg)
+                raise ValueError(msg) from None
+
+        else:
+            raise ValueError("Invalid boundary type: %s" % type(boundary))
+
         if "features" in poly:
             geometry = shape(poly["features"][0]["geometry"])
         elif "geometry" in poly:
@@ -407,14 +433,14 @@ def tile_dir_to_pmtiles(outfile: str, tile_dir: str, bbox: tuple, attribution: s
 
 
 def create_basemap_file(
-    verbose=False,
-    boundary=None,
-    tms=None,
-    xy=False,
-    outfile=None,
-    zooms="12-17",
-    outdir=None,
-    source="esri",
+    verbose: bool = False,
+    boundary: Union[str, BytesIO] = None,
+    tms: str = None,
+    xy: bool = False,
+    outfile: str = None,
+    zooms: str = "12-17",
+    outdir: str = None,
+    source: str = "esri",
 ):
     """Create a basemap with given parameters.
 
